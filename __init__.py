@@ -1,5 +1,6 @@
 import copy
 import os
+import re
 import tempfile
 import time
 import traceback
@@ -66,7 +67,7 @@ class AutoSubv2(_PluginBase):
     # 主题色
     plugin_color = "#2C4F7E"
     # 插件版本
-    plugin_version = "2.6.0"
+    plugin_version = "2.6.1"
     # 插件作者
     plugin_author = "TimoYoung, chhc007"
     # 作者主页
@@ -849,14 +850,21 @@ class AutoSubv2(_PluginBase):
         """批量处理逻辑"""
         indices = [all_subs.index(item) for item in batch]
         context = self.__get_context(all_subs, indices, is_batch=True) if self._context_window > 0 else None
-        batch_text = '\n'.join([item.content for item in batch])
+        # 给每行加序号，帮助LLM严格保持行数
+        batch_text = '\n'.join([f"{i+1}. {item.content}" for i, item in enumerate(batch)])
 
         try:
             ret, result = self.__translate_to_zh(batch_text, context)
             if not ret:
                 raise Exception(result)
 
-            translated = [line.strip() for line in result.split('\n') if line.strip()]
+            # 解析带编号的输出：匹配 "数字. 内容" 格式
+            numbered = re.findall(r'^\d+\.\s*(.+)$', result, re.MULTILINE)
+            if numbered:
+                translated = [line.strip() for line in numbered if line.strip()]
+            else:
+                # 兜底：不带编号的纯文本输出
+                translated = [line.strip() for line in result.split('\n') if line.strip()]
             # 允许少量偏差（LLM偶尔返回空行被过滤），多的截断、少的填充
             if not translated:
                 raise Exception("翻译结果为空")

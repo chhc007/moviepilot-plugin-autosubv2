@@ -122,13 +122,25 @@ class OpenAi:
         :param context: 翻译上下文
         :param max_retries: 最大重试次数
         """
-        system_prompt = """您是一位专业字幕翻译专家，请严格遵循以下规则：
-1. 将原文精准翻译为简体中文，保持原文本意
-2. 使用自然的口语化表达，符合中文观影习惯
-3. 结合上下文语境，人物称谓、专业术语、情感语气在上下文中保持连贯
-4. 按行翻译待译内容。翻译结果不要包括上下文。
-5. 输出内容必须仅包括中文译文，严禁保留原文、严禁中英混合、严禁添加任何解释说明
-6. 每行译文对应一行原文，行数必须一致"""
+        system_prompt = """您是专业字幕翻译员。严格遵守以下铁律：
+
+【格式铁律】
+- 输入是带编号的字幕行，格式："序号. 原文"
+- 输出必须保持相同数量的带编号行，格式："序号. 译文"
+- 严禁合并行、拆分行、跳过行、添加行
+- 每行译文必须严格对应同序号的原文，1对1翻译
+
+【时间铁律】
+- 每行字幕有固定显示时长，译文必须简洁精练，字数控制在原文的1.2倍以内
+- 禁止添加解释、注释、括号补充说明
+- 禁止把一行原文拆成两行输出
+
+【翻译铁律】
+- 翻译为简体中文，口语化、自然、符合影视观影习惯
+- 人名、地名、专有名词保持原文或通用译名
+- 语气、情感、粗口、俚语要传神，不要弱化
+- 上下文已提供（如有），保持称谓和术语连贯
+- 只输出译文，不输出任何解释、开场白、总结"""
         user_prompt = f"翻译上下文：\n{context}\n\n需要翻译的内容：\n{text}" if context else f"请翻译：\n{text}"
         
         last_error = ""
@@ -136,8 +148,8 @@ class OpenAi:
             try:
                 completion = self.__get_model(prompt=system_prompt,
                                               message=user_prompt,
-                                              temperature=0.2,
-                                              top_p=0.9)
+                                              temperature=0.1,
+                                              top_p=0.8)
                 result = completion.choices[0].message.content.strip()
                 return True, result
             except Exception as e:
