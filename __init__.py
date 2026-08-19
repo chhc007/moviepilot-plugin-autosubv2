@@ -857,8 +857,15 @@ class AutoSubv2(_PluginBase):
                 raise Exception(result)
 
             translated = [line.strip() for line in result.split('\n') if line.strip()]
-            if len(translated) != len(batch):
-                raise Exception(f"批次行数不匹配 {len(translated)}/{len(batch)}")
+            # 允许少量偏差（LLM偶尔返回空行被过滤），多的截断、少的填充
+            if not translated:
+                raise Exception("翻译结果为空")
+            if len(translated) < len(batch):
+                translated += [batch[i].content for i in range(len(translated), len(batch))]
+                logger.warning(f"批次翻译行数不足，用原文补齐 {len(translated)}/{len(batch)}")
+            elif len(translated) > len(batch):
+                translated = translated[:len(batch)]
+                logger.warning(f"批次翻译行数多余，截断 {len(translated)}/{len(batch)}")
 
             for item, trans in zip(batch, translated):
                 item.content = trans
