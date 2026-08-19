@@ -901,9 +901,11 @@ class AutoSubv2(_PluginBase):
     def __translate_zh_subtitle(self, source_lang: str, source_subtitle: str, dest_subtitle: str):
         self._stats = {'total': 0, 'batch_success': 0, 'batch_fail': 0, 'line_fallback': 0}
         subs = self.__load_srt(source_subtitle)
-        # 对所有语言都执行字幕合并（碎片字幕合并为完整句子）
-        valid_subs = self.__merge_srt(subs)
-        logger.info(f"字幕合并：合并前字幕数: {len(subs)}, 合并后字幕数: {len(valid_subs)}")
+        if self._enable_merge:
+            valid_subs = self.__merge_srt(subs)
+            logger.info(f"字幕合并：合并前字幕数: {len(subs)}, 合并后字幕数: {len(valid_subs)}")
+        else:
+            valid_subs = subs
         
         if not valid_subs:
             logger.warning("字幕文件为空或没有有效的字幕条目，跳过翻译")
@@ -1474,7 +1476,7 @@ class AutoSubv2(_PluginBase):
                                                                 'component': 'VSwitch',
                                                                 'props': {
                                                                     'model': 'enable_merge',
-                                                                    'label': '翻译英文时合并整句'
+                                                                    'label': '合并碎片字幕为完整句子'
                                                                 }
                                                             }
                                                         ]
