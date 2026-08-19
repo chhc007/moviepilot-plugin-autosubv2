@@ -66,11 +66,11 @@ class AutoSubv2(_PluginBase):
     # 主题色
     plugin_color = "#2C4F7E"
     # 插件版本
-    plugin_version = "2.5.1"
+    plugin_version = "2.6.0"
     # 插件作者
-    plugin_author = "TimoYoung"
+    plugin_author = "TimoYoung, chhc007"
     # 作者主页
-    author_url = "https://github.com/TimoYoung"
+    author_url = "https://github.com/chhc007"
     # 插件配置项ID前缀
     plugin_config_prefix = "autosubv2"
     # 加载顺序
@@ -161,7 +161,7 @@ class AutoSubv2(_PluginBase):
             self._batch_size = int(config.get('batch_size')) if config.get('batch_size') else 10
             self._context_window = int(config.get('context_window')) if config.get('context_window') else 5
             self._max_retries = int(config.get('max_retries')) if config.get('max_retries') else 3
-            self._enable_merge = config.get('enable_merge', False)
+            self._enable_merge = config.get('enable_merge', True)
 
         if self._clear_history:
             config['clear_history'] = False
@@ -620,7 +620,7 @@ class AutoSubv2(_PluginBase):
         :param file_path: 字幕文件路径
         :return:
         """
-        with open(file_path, 'r', encoding="utf8") as f:
+        with open(file_path, 'r', encoding="utf-8-sig") as f:
             srt_text = f.read()
         return list(srt.parse(srt_text))
 
@@ -632,8 +632,20 @@ class AutoSubv2(_PluginBase):
         :param srt_data: 字幕数据
         :return:
         """
-        with open(file_path, 'w', encoding="utf8") as f:
-            f.write(srt.compose(srt_data))
+        # 重新编号，避免序号不连续导致播放器解析失败
+        for i, item in enumerate(srt_data, start=1):
+            item.index = i
+        # 先写临时文件再替换，防止写入中断导致文件损坏
+        tmp_path = file_path + ".tmp"
+        try:
+            with open(tmp_path, 'w', encoding="utf-8-sig") as f:
+                f.write(srt.compose(srt_data))
+            os.replace(tmp_path, file_path)
+        except Exception:
+            # 清理临时文件
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise
 
     def __merge_srt(self, subtitle_data):
         """
@@ -849,7 +861,7 @@ class AutoSubv2(_PluginBase):
                 raise Exception(f"批次行数不匹配 {len(translated)}/{len(batch)}")
 
             for item, trans in zip(batch, translated):
-                item.content = f"{trans}\n{item.content}"
+                item.content = trans
             self._stats['batch_success'] += len(batch)
             return batch
         except Exception as e:
@@ -864,21 +876,19 @@ class AutoSubv2(_PluginBase):
         success, trans = self.__translate_to_zh(item.content, context)
 
         if success:
-            item.content = f"{trans}\n{item.content}"
+            item.content = trans
             self._stats['line_fallback'] += 1
             return item
         else:
-            item.content = f"[翻译失败]\n{item.content}"
+            item.content = f"[翻译失败] {item.content}"
             return item
 
     def __translate_zh_subtitle(self, source_lang: str, source_subtitle: str, dest_subtitle: str):
         self._stats = {'total': 0, 'batch_success': 0, 'batch_fail': 0, 'line_fallback': 0}
         subs = self.__load_srt(source_subtitle)
-        if source_lang in ["en", "eng"] and self._enable_merge:
-            valid_subs = self.__merge_srt(subs)
-            logger.info(f"英文字幕合并：合并前字幕数: {len(subs)},合并后字幕数: {len(valid_subs)}")
-        else:
-            valid_subs = subs
+        # 对所有语言都执行字幕合并（碎片字幕合并为完整句子）
+        valid_subs = self.__merge_srt(subs)
+        logger.info(f"字幕合并：合并前字幕数: {len(subs)}, 合并后字幕数: {len(valid_subs)}")
         
         if not valid_subs:
             logger.warning("字幕文件为空或没有有效的字幕条目，跳过翻译")
@@ -1515,7 +1525,7 @@ class AutoSubv2(_PluginBase):
                                             {
                                                 'component': 'a',
                                                 'props': {
-                                                    'href': 'https://github.com/jxxghp/MoviePilot-Plugins/blob/main/plugins/autosubv2/README.md',
+                                                    'href': 'https://github.com/chhc007/moviepilot-plugin-autosubv2',
                                                     'target': '_blank'
                                                 },
                                                 'content': [
@@ -1556,7 +1566,7 @@ class AutoSubv2(_PluginBase):
             "openai_model": "gpt-3.5-turbo",
             "context_window": 5,
             "max_retries": 3,
-            "enable_merge": False,
+            "enable_merge": True,
             "enable_batch": True,
             "batch_size": 10,
         }
