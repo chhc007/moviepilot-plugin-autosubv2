@@ -101,6 +101,7 @@ class AutoSubv2(_PluginBase):
     _context_window = None
     _max_retries = None
     _enable_merge = None
+    _merge_max_length = None
     _enable_asr = None
     _auto_detect_language = None
     _huggingface_proxy = None
@@ -163,6 +164,7 @@ class AutoSubv2(_PluginBase):
             self._context_window = int(config.get('context_window')) if config.get('context_window') else 5
             self._max_retries = int(config.get('max_retries')) if config.get('max_retries') else 3
             self._enable_merge = config.get('enable_merge', True)
+            self._merge_max_length = int(config.get('merge_max_length')) if config.get('merge_max_length') else 45
 
         if self._clear_history:
             config['clear_history'] = False
@@ -686,7 +688,7 @@ class AutoSubv2(_PluginBase):
             if content.endswith(tuple(end_tokens)):
                 sentence_end = True
             # 如果上句字幕超过一定长度，则设置语句已经终结
-            elif len(merged_subtitle[-1].content) > 80:
+            elif len(merged_subtitle[-1].content) > self._merge_max_length:
                 sentence_end = True
             else:
                 sentence_end = False
@@ -1480,6 +1482,20 @@ class AutoSubv2(_PluginBase):
                                                                 }
                                                             }
                                                         ]
+                                                    },
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 4},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VTextField',
+                                                                'props': {
+                                                                    'model': 'merge_max_length',
+                                                                    'label': '合并最大字符数',
+                                                                    'placeholder': '45'
+                                                                }
+                                                            }
+                                                        ]
                                                     }
                                                 ]
                                             },
@@ -1584,6 +1600,7 @@ class AutoSubv2(_PluginBase):
             "context_window": 5,
             "max_retries": 3,
             "enable_merge": True,
+            "merge_max_length": 45,
             "enable_batch": True,
             "batch_size": 10,
         }
