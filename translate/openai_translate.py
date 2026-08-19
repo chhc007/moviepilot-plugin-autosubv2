@@ -152,7 +152,7 @@ class OpenAi:
 1. 你好，你怎么样？
 2. 我很好，谢谢。
 3. 明天见。"""
-        user_prompt = f"翻译上下文：\n{context}\n\n需要翻译的内容：\n{text}" if context else f"请翻译：\n{text}"
+        user_prompt = f"以下是上下文参考（仅供参考语境，不要翻译）：\n{context}\n\n请翻译以下带编号的字幕（只翻译编号行，严格保持行数）：\n{text}" if context else f"请翻译以下带编号的字幕（只翻译编号行，严格保持行数）：\n{text}"
         
         last_error = ""
         for attempt in range(max_retries + 1):

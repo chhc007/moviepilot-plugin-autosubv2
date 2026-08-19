@@ -824,16 +824,18 @@ class AutoSubv2(_PluginBase):
         return any(content.startswith(t[0]) and content.endswith(t[1]) for t in noisy_tokens)
 
     def __get_context(self, all_subs: list, target_indices: List[int], is_batch: bool) -> str:
-        """通用上下文获取方法"""
+        """获取上下文（仅前后文，不含待翻译内容本身）"""
         min_idx = max(0, min(target_indices) - self._context_window)
         max_idx = min(len(all_subs) - 1, max(target_indices) + self._context_window) if is_batch else min(
             target_indices)
 
         context = []
         for idx in range(min_idx, max_idx + 1):
-            status = "[待译]" if idx in target_indices else ""
+            if idx in target_indices:
+                continue  # 跳过待翻译行，避免LLM重复翻译
             content = all_subs[idx].content.replace('\n', ' ').strip()
-            context.append(f"{status}{content}")
+            if content:
+                context.append(content)
 
         return "\n".join(context)
 
