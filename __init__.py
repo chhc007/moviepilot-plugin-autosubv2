@@ -67,7 +67,7 @@ class AutoSubv2(_PluginBase):
     # 主题色
     plugin_color = "#2C4F7E"
     # 插件版本
-    plugin_version = "2.6.1"
+    plugin_version = "2.6.2"
     # 插件作者
     plugin_author = "TimoYoung, chhc007"
     # 作者主页
@@ -854,28 +854,36 @@ class AutoSubv2(_PluginBase):
         context = self.__get_context(all_subs, indices, is_batch=True) if self._context_window > 0 else None
         # 给每行加序号，帮助LLM严格保持行数
         batch_text = '\n'.join([f"{i+1}. {item.content}" for i, item in enumerate(batch)])
+        expected = len(batch)
 
         try:
             ret, result = self.__translate_to_zh(batch_text, context)
             if not ret:
                 raise Exception(result)
 
-            # 解析带编号的输出：匹配 "数字. 内容" 格式
-            numbered = re.findall(r'^\d+\.\s*(.+)$', result, re.MULTILINE)
-            if numbered:
-                translated = [line.strip() for line in numbered if line.strip()]
-            else:
-                # 兜底：不带编号的纯文本输出
-                translated = [line.strip() for line in result.split('\n') if line.strip()]
-            # 允许少量偏差（LLM偶尔返回空行被过滤），多的截断、少的填充
+            translated = self._parse_translated(result)
+
+            # 行数不匹配时，带纠正信息重试一次
+            if len(translated) != expected and len(translated) > 0:
+                logger.warning(f"批次行数不匹配({len(translated)}/{expected})，带纠正信息重试...")
+                correction = f"你上次返回了{len(translated)}行，要求严格返回{expected}行。请重新翻译，确保输出恰好{expected}行带编号的译文。"
+                retry_prompt = f"请翻译：\n{batch_text}\n\n注意：{correction}"
+                ret2, result2 = self.__translate_to_zh(retry_prompt, context)
+                if ret2:
+                    translated2 = self._parse_translated(result2)
+                    if len(translated2) == expected:
+                        translated = translated2
+                        logger.info(f"重试成功：{len(translated2)}/{expected}")
+
+            # 最终容差处理
             if not translated:
                 raise Exception("翻译结果为空")
-            if len(translated) < len(batch):
-                translated += [batch[i].content for i in range(len(translated), len(batch))]
-                logger.warning(f"批次翻译行数不足，用原文补齐 {len(translated)}/{len(batch)}")
-            elif len(translated) > len(batch):
-                translated = translated[:len(batch)]
-                logger.warning(f"批次翻译行数多余，截断 {len(translated)}/{len(batch)}")
+            if len(translated) < expected:
+                translated += [batch[i].content for i in range(len(translated), expected)]
+                logger.warning(f"批次翻译行数不足，用原文补齐 {len(translated)}/{expected}")
+            elif len(translated) > expected:
+                translated = translated[:expected]
+                logger.warning(f"批次翻译行数多余，截断 {len(translated)}/{expected}")
 
             for item, trans in zip(batch, translated):
                 item.content = trans
@@ -885,6 +893,14 @@ class AutoSubv2(_PluginBase):
             logger.warning(f"批次翻译失败（{str(e)}），降级到单行匹配...")
             self._stats['batch_fail'] += 1
             return [self.__process_single(all_subs, item) for item in batch]
+
+    @staticmethod
+    def _parse_translated(result: str) -> list:
+        """解析翻译结果，优先匹配带编号格式"""
+        numbered = re.findall(r'^\d+\.\s*(.+)$', result, re.MULTILINE)
+        if numbered:
+            return [line.strip() for line in numbered if line.strip()]
+        return [line.strip() for line in result.split('\n') if line.strip()]
 
     def __process_single(self, all_subs: List[srt.Subtitle], item: srt.Subtitle) -> srt.Subtitle:
         """单条处理逻辑"""

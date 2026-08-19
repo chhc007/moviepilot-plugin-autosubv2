@@ -140,7 +140,18 @@ class OpenAi:
 - 人名、地名、专有名词保持原文或通用译名
 - 语气、情感、粗口、俚语要传神，不要弱化
 - 上下文已提供（如有），保持称谓和术语连贯
-- 只输出译文，不输出任何解释、开场白、总结"""
+- 只输出译文，不输出任何解释、开场白、总结
+
+【示例】
+输入：
+1. Hello, how are you?
+2. I'm fine, thanks.
+3. See you tomorrow.
+
+输出：
+1. 你好，你怎么样？
+2. 我很好，谢谢。
+3. 明天见。"""
         user_prompt = f"翻译上下文：\n{context}\n\n需要翻译的内容：\n{text}" if context else f"请翻译：\n{text}"
         
         last_error = ""
@@ -148,8 +159,8 @@ class OpenAi:
             try:
                 completion = self.__get_model(prompt=system_prompt,
                                               message=user_prompt,
-                                              temperature=0.1,
-                                              top_p=0.8)
+                                              temperature=0.0,
+                                              top_p=0.7)
                 result = completion.choices[0].message.content.strip()
                 return True, result
             except Exception as e:
