@@ -764,9 +764,8 @@ class AutoSubv2(_PluginBase):
         subtitle_score = 0
         subtitle_stream = filter(lambda x: x.get('codec_type') == 'subtitle', video_meta.get('streams', []))
         for index, stream in enumerate(subtitle_stream):
-            # 如果是强制字幕，则跳过
-            if stream.get('disposition', {}).get('forced'):
-                continue
+            # 强制字幕(forced)不再跳过：它是压制组指定显示的完整字幕，
+            # 常被标为偏好语言（如本片 eng forced+default），应参与正常评分以还原英文优先语义
             # image-based 字幕，跳过
             if only_srt and (
                     'width' in stream
@@ -849,7 +848,8 @@ class AutoSubv2(_PluginBase):
                 raise Exception(f"批次行数不匹配 {len(translated)}/{len(batch)}")
 
             for item, trans in zip(batch, translated):
-                item.content = f"{trans}\n{item.content}"
+                # 仅保留中文译文，不再拼接原文
+                item.content = trans
             self._stats['batch_success'] += len(batch)
             return batch
         except Exception as e:
@@ -864,7 +864,8 @@ class AutoSubv2(_PluginBase):
         success, trans = self.__translate_to_zh(item.content, context)
 
         if success:
-            item.content = f"{trans}\n{item.content}"
+            # 仅保留中文译文，不再拼接原文
+            item.content = trans
             self._stats['line_fallback'] += 1
             return item
         else:
