@@ -1,5 +1,6 @@
 import copy
 import os
+import re
 import tempfile
 import time
 import traceback
@@ -66,11 +67,11 @@ class AutoSubv2(_PluginBase):
     # 主题色
     plugin_color = "#2C4F7E"
     # 插件版本
-    plugin_version = "2.5.1"
+    plugin_version = "3.0.0"
     # 插件作者
-    plugin_author = "TimoYoung"
+    plugin_author = "TimoYoung, chhc007"
     # 作者主页
-    author_url = "https://github.com/TimoYoung"
+    author_url = "https://github.com/chhc007"
     # 插件配置项ID前缀
     plugin_config_prefix = "autosubv2"
     # 加载顺序
@@ -129,39 +130,56 @@ class AutoSubv2(_PluginBase):
             self._huggingface_proxy = config.get('proxy', True)
             self._auto_detect_language = config.get('auto_detect_language', False)
         self._translate_zh = config.get('translate_zh', False)
+        # Hy-MT2 专用翻译方案开关
+        self._use_hymt2 = config.get('use_hymt2', False)
         if self._translate_zh:
-            use_chatgpt = config.get('use_chatgpt', True)
-            if use_chatgpt:
-                chatgpt = self.get_config("ChatGPT")
-                if not chatgpt:
-                    logger.error(f"翻译依赖于ChatGPT，请先维护ChatGPT插件")
+            if self._use_hymt2:
+                # Hy-MT2 方案：独立配置，不依赖ChatGPT插件
+                hy_key = config.get('hy_mt2_key')
+                if not hy_key:
+                    logger.error(f"Hy-MT2翻译方案缺少API密钥配置")
                     return
-                openai_key_str = chatgpt and chatgpt.get("openai_key")
-                openai_url = chatgpt and chatgpt.get("openai_url")
-                openai_proxy = chatgpt and chatgpt.get("proxy")
-                openai_model = chatgpt and chatgpt.get("model")
-                compatible = chatgpt and chatgpt.get("compatible")
-                if not openai_key_str:
-                    logger.error(f"请先在ChatGPT插件中维护openai_key")
-                    return
-                openai_key = [key.strip() for key in openai_key_str.split(',') if key.strip()][0]
+                hy_url = config.get('hy_mt2_url', "http://192.168.123.146:11436")
+                hy_model = config.get('hy_mt2_model', "hymt2-q8")
+                self._openai = OpenAi(api_key=hy_key, api_url=hy_url,
+                                      proxy=None, model=hy_model, compatible=False)
+                self._hy_mt2_batch_size = int(config.get('hy_mt2_batch_size')) if config.get('hy_mt2_batch_size') else 20
+                self._hy_mt2_context_window = int(config.get('hy_mt2_context_window')) if config.get('hy_mt2_context_window') else 10
+                self._hy_mt2_max_retries = int(config.get('hy_mt2_max_retries')) if config.get('hy_mt2_max_retries') else 3
+                self._hy_mt2_fallback = config.get('hy_mt2_fallback', True)
             else:
-                openai_key = config.get('openai_key')
-                if not openai_key:
-                    logger.error(f"翻译依赖于OpenAI，请先维护openai_key")
-                    return
-                openai_url = config.get('openai_url', "https://api.openai.com")
-                openai_proxy = config.get('openai_proxy', False)
-                openai_model = config.get('openai_model', "gpt-3.5-turbo")
-                compatible = config.get('compatible', False)
-            self._openai = OpenAi(api_key=openai_key, api_url=openai_url,
-                                  proxy=settings.PROXY if openai_proxy else None,
-                                  model=openai_model, compatible=bool(compatible))
-            self._enable_batch = config.get('enable_batch', True)
-            self._batch_size = int(config.get('batch_size')) if config.get('batch_size') else 10
-            self._context_window = int(config.get('context_window')) if config.get('context_window') else 5
-            self._max_retries = int(config.get('max_retries')) if config.get('max_retries') else 3
-            self._enable_merge = config.get('enable_merge', False)
+                use_chatgpt = config.get('use_chatgpt', True)
+                if use_chatgpt:
+                    chatgpt = self.get_config("ChatGPT")
+                    if not chatgpt:
+                        logger.error(f"翻译依赖于ChatGPT，请先维护ChatGPT插件")
+                        return
+                    openai_key_str = chatgpt and chatgpt.get("openai_key")
+                    openai_url = chatgpt and chatgpt.get("openai_url")
+                    openai_proxy = chatgpt and chatgpt.get("proxy")
+                    openai_model = chatgpt and chatgpt.get("model")
+                    compatible = chatgpt and chatgpt.get("compatible")
+                    if not openai_key_str:
+                        logger.error(f"请先在ChatGPT插件中维护openai_key")
+                        return
+                    openai_key = [key.strip() for key in openai_key_str.split(',') if key.strip()][0]
+                else:
+                    openai_key = config.get('openai_key')
+                    if not openai_key:
+                        logger.error(f"翻译依赖于OpenAI，请先维护openai_key")
+                        return
+                    openai_url = config.get('openai_url', "https://api.openai.com")
+                    openai_proxy = config.get('openai_proxy', False)
+                    openai_model = config.get('openai_model', "gpt-3.5-turbo")
+                    compatible = config.get('compatible', False)
+                self._openai = OpenAi(api_key=openai_key, api_url=openai_url,
+                                      proxy=settings.PROXY if openai_proxy else None,
+                                      model=openai_model, compatible=bool(compatible))
+                self._enable_batch = config.get('enable_batch', True)
+                self._batch_size = int(config.get('batch_size')) if config.get('batch_size') else 10
+                self._context_window = int(config.get('context_window')) if config.get('context_window') else 5
+                self._max_retries = int(config.get('max_retries')) if config.get('max_retries') else 3
+                self._enable_merge = config.get('enable_merge', False)
 
         if self._clear_history:
             config['clear_history'] = False
@@ -874,6 +892,10 @@ class AutoSubv2(_PluginBase):
 
     def __translate_zh_subtitle(self, source_lang: str, source_subtitle: str, dest_subtitle: str):
         self._stats = {'total': 0, 'batch_success': 0, 'batch_fail': 0, 'line_fallback': 0}
+        # Hy-MT2 专用翻译方案：结构化批量翻译，行数严格保持，绕过旧合并/批量逻辑
+        if getattr(self, '_use_hymt2', False):
+            self.__translate_zh_hymt2(source_subtitle, dest_subtitle)
+            return
         subs = self.__load_srt(source_subtitle)
         if source_lang in ["en", "eng"] and self._enable_merge:
             valid_subs = self.__merge_srt(subs)
@@ -913,6 +935,158 @@ class AutoSubv2(_PluginBase):
     批次失败: {self._stats['batch_fail']}
     行补偿翻译: {self._stats['line_fallback']}
             """)
+
+    # ==================== Hy-MT2 专用翻译方案 (v3.0.0) ====================
+    @staticmethod
+    def __hymt2_clean_text(content: str) -> str:
+        """剥离HTML(<font>)与ass({\\an2})样式标签，压平换行"""
+        text = re.sub(r"<[^>]+>", "", content)
+        text = re.sub(r"\{[^}]*\}", "", text)
+        text = text.replace("\n", " ").replace("\\N", " ")
+        return re.sub(r"\s+", " ", text).strip()
+
+    def __hymt2_chat(self, prompt: str) -> str:
+        """直接调用模型(OpenAI兼容/v1)。不传采样参数——模型Modelfile已内置官方参数"""
+        model = getattr(self._openai, '_model', None) or "hymt2-q8"
+        last_err = None
+        for attempt in range(3):
+            try:
+                resp = self._openai.client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                return (resp.choices[0].message.content or "").strip()
+            except Exception as e:
+                last_err = e
+                logger.warn(f"Hy-MT2请求失败(第{attempt + 1}次)：{e}")
+                time.sleep(2 ** attempt)
+        logger.error(f"Hy-MT2请求失败：{last_err}")
+        return ""
+
+    @staticmethod
+    def __hymt2_build_prompt(batch_texts: List[str], ctx_texts: List[str], start_no: int) -> str:
+        """官方 Structured Data 2(背景/待译分区) + Delimiters(等量分隔符) + 结尾锚点"""
+        ctx_text = "\n".join(ctx_texts)
+        num_text = "\n".join(f"{start_no + k}. {t}" for k, t in enumerate(batch_texts))
+        anchor = (f"（以上共 {len(batch_texts)} 行待译，必须逐行输出全部 {len(batch_texts)} 条译文，"
+                  f"从 {start_no} 行开始顺序编号，不得遗漏任何一行）")
+        return ("【背景信息】\n" + ctx_text + "\n"
+                "请结合背景信息将以下文本准确翻译为中文。你必须在译文中保留等量的分隔符，"
+                "绝对不可遗漏、转义或翻译该符号，并注意分隔符的位置。\n"
+                "【待翻译文本】\n" + num_text + "\n" + anchor)
+
+    @staticmethod
+    def __hymt2_parse(raw: str, start_no: int, count: int) -> Dict[int, str]:
+        """解析模型输出的编号行译文：'N. 译文'"""
+        got = {}
+        pat = re.compile(r"^\s*(\d+)\s*[.、:：]\s*(.+)$", re.M)
+        for m in pat.finditer(raw):
+            kid = int(m.group(1))
+            text = m.group(2).strip()
+            if text and start_no <= kid < start_no + count:
+                got[kid] = text
+        return got
+
+    @staticmethod
+    def __hymt2_clean_backfill(out: str) -> str:
+        """清洗单行兜底输出：取【待翻译】标记后内容，多行取最后一段，去常见前缀"""
+        if "【待翻译】" in out:
+            out = out.split("【待翻译】")[-1]
+        parts = [l.strip() for l in out.split("\n") if l.strip()]
+        if not parts:
+            return ""
+        t = parts[-1]
+        t = re.sub(r"^(译文|翻译)[:：]\s*", "", t)
+        t = re.sub(r"^\d+[.、:：]\s*", "", t)
+        t = re.sub(r'^["\'“]|["\'”]$', "", t)
+        return t.strip()
+
+    def __hymt2_backfill(self, text: str, prev_texts: List[str]) -> str:
+        """缺失行单行补译：优先纯单行(不回显前文)，空则退带前文版"""
+        for _ in range(2):
+            out = self.__hymt2_chat("将下面这行英文字幕翻译为简体中文，只输出译文本身，不要输出其他内容：\n" + text)
+            t = self.__hymt2_clean_backfill(out)
+            if t:
+                return t
+        prompt = ("参考以下前文保持连贯，把【待翻译】那一行字幕翻译成中文，只输出该行的译文本身：\n"
+                  "【前文】\n" + "\n".join(prev_texts) + "\n【待翻译】\n" + text)
+        return self.__hymt2_clean_backfill(self.__hymt2_chat(prompt))
+
+    def __translate_zh_hymt2(self, source_subtitle: str, dest_subtitle: str):
+        """Hy-MT2结构化批量翻译：清洗→分批→官方模板→编号解析→缺行重试→单行兜底
+        输出仅中文译文替换原字幕content，条目数与时间轴保持不变(不做merge/合并)。"""
+        subs = self.__load_srt(source_subtitle)
+        if not subs:
+            logger.warning("字幕文件为空，跳过翻译")
+            self.__save_srt(dest_subtitle, [])
+            return
+        # 数据清洗：空条目(清洗后为空)不参与翻译，输出时保留原content
+        valid = []  # (subs索引, 清洗后文本)
+        for i, item in enumerate(subs):
+            text = self.__hymt2_clean_text(item.content)
+            if text:
+                valid.append((i, text))
+        if not valid:
+            logger.warning("字幕内容全部为空，跳过翻译")
+            self.__save_srt(dest_subtitle, subs)
+            return
+
+        batch_size = getattr(self, '_hy_mt2_batch_size', 20) or 20
+        ctx_win = getattr(self, '_hy_mt2_context_window', 10) or 10
+        max_retries = getattr(self, '_hy_mt2_max_retries', 3) or 3
+        use_fallback = getattr(self, '_hy_mt2_fallback', True)
+        valid_texts = [t for _, t in valid]
+        results = {}  # subs索引 -> 译文
+        stats = {'batches': 0, 'first_ok': 0, 'retry_ok': 0, 'backfill': 0, 'missing': 0}
+        start_t = time.time()
+
+        for start in range(0, len(valid), batch_size):
+            chunk = valid[start:start + batch_size]
+            stats['batches'] += 1
+            batch_texts = [t for _, t in chunk]
+            ctx_b = valid_texts[max(0, start - ctx_win):start]
+            ctx_a = valid_texts[start + len(chunk):start + len(chunk) + ctx_win]
+            prompt = self.__hymt2_build_prompt(batch_texts, ctx_b + ctx_a, start + 1)
+
+            got = {}
+            attempt = 0
+            for attempt in range(1, max_retries + 1):
+                raw = self.__hymt2_chat(prompt)
+                got = self.__hymt2_parse(raw, start + 1, len(chunk))
+                if len(got) == len(chunk):
+                    break
+            if len(got) == len(chunk):
+                if attempt == 1:
+                    stats['first_ok'] += 1
+                else:
+                    stats['retry_ok'] += 1
+            else:
+                missing = [k for k in range(start + 1, start + len(chunk) + 1) if k not in got]
+                if use_fallback:
+                    for k in missing:
+                        idx = start + (k - start - 1)
+                        t = self.__hymt2_backfill(valid_texts[idx], valid_texts[max(0, idx - 5):idx])
+                        if t:
+                            got[k] = t
+                            stats['backfill'] += 1
+                still_missing = [k for k in range(start + 1, start + len(chunk) + 1) if k not in got]
+                stats['missing'] += len(still_missing)
+                if still_missing:
+                    logger.warning(f"Hy-MT2批次[{start + 1}-{start + len(chunk)}] 重试{max_retries}次后仍有{len(still_missing)}行缺失: {still_missing}")
+            # 写回该批译文（保持原字幕条目）
+            for k, item in enumerate(chunk, start=start + 1):
+                if k in got:
+                    results[item[0]] = got[k]
+
+        # 译文写回字幕(仅中文替换content)
+        for i, item in enumerate(subs):
+            if i in results:
+                item.content = results[i]
+        self.__save_srt(dest_subtitle, subs)
+        elapsed = round(time.time() - start_t)
+        logger.info(f"Hy-MT2翻译完成：总批{stats['batches']}，一次过{stats['first_ok']}，"
+                    f"重试后过{stats['retry_ok']}，单行兜底{stats['backfill']}，"
+                    f"最终缺失{stats['missing']}，耗时{elapsed}秒")
 
     @staticmethod
     def __external_subtitle_exists(video_file, prefer_langs=None, only_srt=False, strict=True):
@@ -1310,6 +1484,23 @@ class AutoSubv2(_PluginBase):
                                                             {
                                                                 'component': 'VSwitch',
                                                                 'props': {
+                                                                    'model': 'use_hymt2',
+                                                                    'label': '启用Hy-MT2专用翻译方案',
+                                                                    'hint': '结构化批量翻译：行数严格保持、防合译错位、漏行自动重试+单行兜底（需在下方折叠区配置模型）'
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {
+                                                            'cols': 12,
+                                                            'md': 4,
+                                                        },
+                                                        'content': [
+                                                            {
+                                                                'component': 'VSwitch',
+                                                                'props': {
                                                                     'model': 'openai_proxy',
                                                                     'label': '使用代理服务器',
                                                                     'v-show': '!use_chatgpt',
@@ -1492,6 +1683,134 @@ class AutoSubv2(_PluginBase):
                                         ]
                                     }
                                 ]
+                            },
+                            {
+                                'component': 'VExpansionPanel',
+                                'props': {'v-show': 'use_hymt2'},
+                                'content': [
+                                    {
+                                        'component': 'VExpansionPanelTitle',
+                                        'text': 'Hy-MT2翻译方案参数设置'
+                                    },
+                                    {
+                                        'component': 'VExpansionPanelText',
+                                        'content': [
+                                            {
+                                                'component': 'VRow',
+                                                'content': [
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 4},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VTextField',
+                                                                'props': {
+                                                                    'model': 'hy_mt2_url',
+                                                                    'label': 'OpenAI API Url',
+                                                                    'placeholder': 'http://192.168.123.146:11436'
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 4},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VTextField',
+                                                                'props': {
+                                                                    'model': 'hy_mt2_key',
+                                                                    'label': 'API密钥',
+                                                                    'placeholder': 'sk-xxx（Ollama可任意填写）'
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 4},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VTextField',
+                                                                'props': {
+                                                                    'model': 'hy_mt2_model',
+                                                                    'label': '模型名称',
+                                                                    'placeholder': 'hymt2-q8'
+                                                                }
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                'component': 'VRow',
+                                                'content': [
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 4},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VTextField',
+                                                                'props': {
+                                                                    'model': 'hy_mt2_batch_size',
+                                                                    'label': '每批翻译行数',
+                                                                    'placeholder': '20'
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 4},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VTextField',
+                                                                'props': {
+                                                                    'model': 'hy_mt2_context_window',
+                                                                    'label': '上下文窗口大小',
+                                                                    'placeholder': '10'
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 4},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VTextField',
+                                                                'props': {
+                                                                    'model': 'hy_mt2_max_retries',
+                                                                    'label': '批次重试次数',
+                                                                    'placeholder': '3'
+                                                                }
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                'component': 'VRow',
+                                                'content': [
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 12},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VSwitch',
+                                                                'props': {
+                                                                    'model': 'hy_mt2_fallback',
+                                                                    'label': '启用单行兜底',
+                                                                    'hint': '重试后仍缺失的行，用前文上下文单独补译'
+                                                                }
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
                             }
                         ]
                     },
@@ -1550,6 +1869,14 @@ class AutoSubv2(_PluginBase):
             "proxy": True,
             "use_chatgpt": True,
             "use_chatgpt_trigger": 0,
+            "use_hymt2": False,
+            "hy_mt2_url": "http://192.168.123.146:11436",
+            "hy_mt2_key": "sk-local",
+            "hy_mt2_model": "hymt2-q8",
+            "hy_mt2_batch_size": "20",
+            "hy_mt2_context_window": "10",
+            "hy_mt2_max_retries": "3",
+            "hy_mt2_fallback": True,
             "openai_proxy": False,
             "compatible": False,
             "openai_url": "https://api.openai.com",
